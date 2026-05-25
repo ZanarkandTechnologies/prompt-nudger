@@ -32,6 +32,7 @@ The Codex setup wizard will:
 - enable `codex_hooks = true`
 - optionally send a Telegram test message
 - optionally start the live typing nudger in the background
+- offer to install PyObjC into a private `~/.prompt-nudger/venv` when live keyboard mode needs it
 - optionally create a periodic reminder every configurable number of minutes
 
 The setup wizard stores Telegram credentials only in your local LaunchAgent plist. If you prefer manual setup, use the steps below.
@@ -43,7 +44,11 @@ prompt-nudger --print-config
 prompt-nudger --send-test
 prompt-nudger --remind-now
 prompt-nudger --pulse
+prompt-nudger-install-codex --status
+prompt-nudger-install-codex --stop
 ```
+
+Use `prompt-nudger-install-codex --stop` to turn off the background live helper and periodic reminder without deleting your files or config.
 
 ## Manual Setup
 
@@ -74,6 +79,14 @@ Run live macOS keyboard activity monitoring:
 ```
 
 macOS live mode requires Accessibility permission for the terminal app running the script. The event tap is listen-only.
+It also needs PyObjC:
+
+```bash
+python3 -m pip install pyobjc
+```
+
+The Codex setup wizard can install this into a private Prompt Nudger environment for you.
+Codex hooks, shortcut pulses, and periodic reminders still work without PyObjC.
 
 ## WisprFlow / Raycast / BetterTouchTool
 

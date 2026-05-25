@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import getpass
 import json
 import os
@@ -18,11 +19,14 @@ ROOT = Path(__file__).resolve().parent
 INSTALL_DIR = Path.home() / ".prompt-nudger"
 BIN_SCRIPT = INSTALL_DIR / "prompt_nudger.py"
 LOG_DIR = INSTALL_DIR / "logs"
+VENV_DIR = INSTALL_DIR / "venv"
 CODEX_HOOK = Path.home() / ".codex" / "hooks" / "prompt_nudger_codex_activity.py"
 CODEX_HOOKS_JSON = Path.home() / ".codex" / "hooks.json"
 CODEX_CONFIG_TOML = Path.home() / ".codex" / "config.toml"
 LIVE_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.zanarkand.prompt-nudger.plist"
 REMINDER_PLIST = Path.home() / "Library" / "LaunchAgents" / "com.zanarkand.prompt-nudger.reminder.plist"
+LIVE_LABEL = "com.zanarkand.prompt-nudger"
+REMINDER_LABEL = "com.zanarkand.prompt-nudger.reminder"
 
 
 def ask(prompt: str, default: str | None = None, secret: bool = False) -> str:
@@ -42,14 +46,20 @@ def ask_yes_no(prompt: str, default: bool = True) -> bool:
     return value in {"y", "yes", "1", "true"}
 
 
+def safe_copy(source: Path, destination: Path) -> None:
+    if source.resolve() == destination.resolve():
+        return
+    shutil.copy2(source, destination)
+
+
 def copy_files() -> None:
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "prompt_nudger.py", BIN_SCRIPT)
+    safe_copy(ROOT / "prompt_nudger.py", BIN_SCRIPT)
     BIN_SCRIPT.chmod(0o755)
 
     CODEX_HOOK.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(ROOT / "hooks" / "codex_activity.py", CODEX_HOOK)
+    safe_copy(ROOT / "hooks" / "codex_activity.py", CODEX_HOOK)
     CODEX_HOOK.chmod(0o755)
 
 
@@ -168,11 +178,12 @@ def write_launch_agent(
     args: list[str],
     env: dict[str, str],
     start_interval_seconds: int | None = None,
+    python_path: Path | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     plist: dict[str, Any] = {
         "Label": label,
-        "ProgramArguments": [sys.executable, str(BIN_SCRIPT), *args],
+        "ProgramArguments": [str(python_path or Path(sys.executable)), str(BIN_SCRIPT), *args],
         "EnvironmentVariables": env,
         "StandardOutPath": str(LOG_DIR / f"{label}.out.log"),
         "StandardErrorPath": str(LOG_DIR / f"{label}.err.log"),
@@ -195,6 +206,68 @@ def launch_agent(path: Path, label: str) -> None:
     subprocess.run(["launchctl", "kickstart", "-k", f"{domain}/{label}"], check=False)
 
 
+def stop_launch_agent(path: Path, label: str) -> None:
+    domain = f"gui/{os.getuid()}"
+    subprocess.run(["launchctl", "bootout", domain, str(path)], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"Stopped {label} if it was running.")
+
+
+def print_launch_agent_status(label: str) -> None:
+    domain_label = f"gui/{os.getuid()}/{label}"
+    result = subprocess.run(["launchctl", "print", domain_label], check=False, capture_output=True, text=True)
+    if result.returncode == 0:
+        first_lines = "\n".join(result.stdout.splitlines()[:12])
+        print(first_lines)
+    else:
+        print(f"{label}: not loaded")
+
+
+def pyobjc_available() -> bool:
+    try:
+        import CoreFoundation  # type: ignore[import-not-found, unused-ignore]
+        import Quartz  # type: ignore[import-not-found, unused-ignore]
+    except Exception:
+        return False
+    return True
+
+
+def pyobjc_available_for_python(python_path: Path) -> bool:
+    result = subprocess.run(
+        [str(python_path), "-c", "import CoreFoundation, Quartz"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def install_pyobjc_runtime() -> Path | None:
+    python_path = VENV_DIR / "bin" / "python"
+    if python_path.exists() and pyobjc_available_for_python(python_path):
+        return python_path
+    print("Creating a private Python environment for live keyboard monitoring...")
+    subprocess.run([sys.executable, "-m", "venv", str(VENV_DIR)], check=False)
+    if not python_path.exists():
+        print("Could not create the private Python environment.")
+        return None
+    result = subprocess.run([str(python_path), "-m", "pip", "install", "pyobjc"], check=False)
+    if result.returncode != 0 or not pyobjc_available_for_python(python_path):
+        print("PyObjC install failed. Live keyboard mode was not started.")
+        return None
+    return python_path
+
+
+def print_pyobjc_note() -> None:
+    if sys.platform != "darwin":
+        return
+    if pyobjc_available():
+        return
+    print("\nLive keyboard mode needs PyObjC for macOS event taps.")
+    print("Install it with:")
+    print("  python3 -m pip install pyobjc")
+    print("Shortcut pulses, Codex hooks, and periodic reminders still work without PyObjC.")
+
+
 def install_launch_agents(token: str, chat_id: str) -> None:
     env = plist_env(
         token,
@@ -203,8 +276,15 @@ def install_launch_agents(token: str, chat_id: str) -> None:
     )
 
     if ask_yes_no("Run the live typing nudger in the background?", True):
-        write_launch_agent(LIVE_PLIST, "com.zanarkand.prompt-nudger", [], env)
-        launch_agent(LIVE_PLIST, "com.zanarkand.prompt-nudger")
+        python_path = Path(sys.executable)
+        if sys.platform == "darwin" and not pyobjc_available():
+            print_pyobjc_note()
+            if ask_yes_no("Install PyObjC into a private Prompt Nudger environment now?", True):
+                installed_python = install_pyobjc_runtime()
+                if installed_python is not None:
+                    python_path = installed_python
+        write_launch_agent(LIVE_PLIST, LIVE_LABEL, [], env, python_path=python_path)
+        launch_agent(LIVE_PLIST, LIVE_LABEL)
         print(f"Installed live helper LaunchAgent: {LIVE_PLIST}")
 
     interval_minutes = ask("Send periodic prompt reminders every N minutes? Blank disables", "")
@@ -216,16 +296,39 @@ def install_launch_agents(token: str, chat_id: str) -> None:
             return
         write_launch_agent(
             REMINDER_PLIST,
-            "com.zanarkand.prompt-nudger.reminder",
+            REMINDER_LABEL,
             ["--remind-now"],
             env,
             start_interval_seconds=minutes * 60,
         )
-        launch_agent(REMINDER_PLIST, "com.zanarkand.prompt-nudger.reminder")
+        launch_agent(REMINDER_PLIST, REMINDER_LABEL)
         print(f"Installed reminder LaunchAgent: {REMINDER_PLIST}")
 
 
+def stop_services() -> None:
+    stop_launch_agent(LIVE_PLIST, LIVE_LABEL)
+    stop_launch_agent(REMINDER_PLIST, REMINDER_LABEL)
+
+
+def print_status() -> None:
+    print_launch_agent_status(LIVE_LABEL)
+    print()
+    print_launch_agent_status(REMINDER_LABEL)
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Install and manage Prompt Nudger for Codex.")
+    parser.add_argument("--status", action="store_true", help="Show local LaunchAgent status")
+    parser.add_argument("--stop", action="store_true", help="Stop Prompt Nudger LaunchAgents without deleting files")
+    args = parser.parse_args()
+
+    if args.status:
+        print_status()
+        return 0
+    if args.stop:
+        stop_services()
+        return 0
+
     print("Prompt Nudger Codex installer")
     print("This installs local Codex hooks and optional background Telegram nudges.")
     copy_files()

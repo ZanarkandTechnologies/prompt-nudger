@@ -32,6 +32,8 @@ echo "  prompt-nudger --print-config"
 echo "  prompt-nudger --send-test"
 echo "  prompt-nudger --remind-now"
 echo "  prompt-nudger-install-codex"
+echo "  prompt-nudger-install-codex --status"
+echo "  prompt-nudger-install-codex --stop"
 echo
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   echo "Add this to your shell profile if prompt-nudger is not found:"
