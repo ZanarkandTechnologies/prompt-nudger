@@ -6,15 +6,26 @@ Prompt Nudger is the tiny standalone version of the activity nudge loop. It does
 
 ## Quick Start
 
-The easiest Codex setup is the installer:
+Install the local CLI:
 
 ```bash
 git clone https://github.com/ZanarkandTechnologies/prompt-nudger.git
 cd prompt-nudger
-python3 install_codex.py
+./install.sh
 ```
 
-It will:
+Then run the Codex setup wizard:
+
+```bash
+prompt-nudger-install-codex
+```
+
+The CLI installer gives you:
+
+- `prompt-nudger`
+- `prompt-nudger-install-codex`
+
+The Codex setup wizard will:
 
 - copy Prompt Nudger into `~/.prompt-nudger`
 - install the local Codex hooks
@@ -23,7 +34,16 @@ It will:
 - optionally start the live typing nudger in the background
 - optionally create a periodic reminder every configurable number of minutes
 
-The installer stores Telegram credentials only in your local LaunchAgent plist. If you prefer manual setup, use the steps below.
+The setup wizard stores Telegram credentials only in your local LaunchAgent plist. If you prefer manual setup, use the steps below.
+
+Common commands:
+
+```bash
+prompt-nudger --print-config
+prompt-nudger --send-test
+prompt-nudger --remind-now
+prompt-nudger --pulse
+```
 
 ## Manual Setup
 
