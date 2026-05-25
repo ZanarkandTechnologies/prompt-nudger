@@ -6,6 +6,27 @@ Prompt Nudger is the tiny standalone version of the activity nudge loop. It does
 
 ## Quick Start
 
+The easiest Codex setup is the installer:
+
+```bash
+git clone https://github.com/ZanarkandTechnologies/prompt-nudger.git
+cd prompt-nudger
+python3 install_codex.py
+```
+
+It will:
+
+- copy Prompt Nudger into `~/.prompt-nudger`
+- install the local Codex hooks
+- enable `codex_hooks = true`
+- optionally send a Telegram test message
+- optionally start the live typing nudger in the background
+- optionally create a periodic reminder every configurable number of minutes
+
+The installer stores Telegram credentials only in your local LaunchAgent plist. If you prefer manual setup, use the steps below.
+
+## Manual Setup
+
 ```bash
 git clone https://github.com/ZanarkandTechnologies/prompt-nudger.git
 cd prompt-nudger
@@ -111,6 +132,7 @@ All config is environment variables.
 | `TELEGRAM_BOT_TOKEN` | empty | Telegram bot token. Required unless `NUDGE_DRY_RUN=1`. |
 | `TELEGRAM_CHAT_ID` | empty | Telegram chat/user id. Required unless `NUDGE_DRY_RUN=1`. |
 | `NUDGE_MESSAGE` | natural prompt | Message shown before diagnostics. |
+| `NUDGE_REMINDER_MESSAGE` | natural reminder | Message sent by `--remind-now` and the periodic LaunchAgent. |
 | `NUDGE_INCLUDE_DETAILS` | `1` | Add machine, score, and observed timestamp after a blank line. |
 | `NUDGE_DRY_RUN` | `0` | Print the message instead of sending Telegram. |
 | `NUDGE_MACHINE_NAME` | hostname | Displayed in message details. |
@@ -154,6 +176,12 @@ Test a shortcut pulse:
 
 ```bash
 ./prompt_nudger.py --pulse
+```
+
+Send one periodic-reminder style message now:
+
+```bash
+./prompt_nudger.py --remind-now
 ```
 
 Test Codex active-work suppression:
@@ -208,6 +236,52 @@ Load it:
 ```bash
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.zanarkand.prompt-nudger.plist
 launchctl kickstart -k "gui/$(id -u)/com.zanarkand.prompt-nudger"
+```
+
+## Periodic Prompt Reminders
+
+The installer can create this automatically. For manual setup, create a second LaunchAgent:
+
+`~/Library/LaunchAgents/com.zanarkand.prompt-nudger.reminder.plist`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.zanarkand.prompt-nudger.reminder</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/path/to/prompt_nudger.py</string>
+    <string>--remind-now</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>TELEGRAM_BOT_TOKEN</key>
+    <string>replace-me</string>
+    <key>TELEGRAM_CHAT_ID</key>
+    <string>replace-me</string>
+    <key>NUDGE_REMINDER_MESSAGE</key>
+    <string>Quick reminder: write another prompt and keep the loop moving.</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>900</integer>
+</dict>
+</plist>
+```
+
+`StartInterval` is seconds. `900` means every 15 minutes; `3600` means every hour.
+
+Load it:
+
+```bash
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.zanarkand.prompt-nudger.reminder.plist
+launchctl kickstart -k "gui/$(id -u)/com.zanarkand.prompt-nudger.reminder"
 ```
 
 ## Privacy

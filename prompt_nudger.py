@@ -32,6 +32,7 @@ class Config:
     telegram_bot_token: str
     telegram_chat_id: str
     message: str
+    reminder_message: str
     include_details: bool
     dry_run: bool
     machine_name: str
@@ -96,6 +97,10 @@ def load_config() -> Config:
         message=os.getenv(
             "NUDGE_MESSAGE",
             "Hey, you've been writing for a bit. Want to spin up another agent thread?",
+        ).strip(),
+        reminder_message=os.getenv(
+            "NUDGE_REMINDER_MESSAGE",
+            "Quick reminder: write another prompt and keep the loop moving.",
         ).strip(),
         include_details=env_bool("NUDGE_INCLUDE_DETAILS", True),
         dry_run=env_bool("NUDGE_DRY_RUN", False),
@@ -189,7 +194,7 @@ def has_active_local_work(config: Config) -> bool:
     return isinstance(active_turns, dict) and len(active_turns) > 0
 
 
-def build_message(config: Config, score: int, observed_at_ms: int) -> str:
+def build_activity_message(config: Config, score: int, observed_at_ms: int) -> str:
     text = config.message or "Want to spin up another agent thread?"
     if not config.include_details:
         return text
@@ -202,15 +207,37 @@ def build_message(config: Config, score: int, observed_at_ms: int) -> str:
     return "\n".join([text, *details])
 
 
-def send_telegram(config: Config, score: int, observed_at_ms: int) -> bool:
-    text = build_message(config, score, observed_at_ms)
+def build_reminder_message(config: Config, observed_at_ms: int) -> str:
+    text = config.reminder_message or "Write another prompt and keep the loop moving."
+    if not config.include_details:
+        return text
+    details = [
+        "",
+        f"Machine: {config.machine_name}",
+        f"Observed: {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(observed_at_ms / 1000))}",
+    ]
+    return "\n".join([text, *details])
+
+
+def send_telegram_text(config: Config, text: str) -> bool:
     if config.dry_run:
         print("prompt-nudger: dry run telegram message")
         print(text)
         return True
     if not config.telegram_bot_token or not config.telegram_chat_id:
         print("prompt-nudger: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
-        return False
+    return False
+
+
+def send_activity_nudge(config: Config, score: int, observed_at_ms: int) -> bool:
+    return send_telegram_text(config, build_activity_message(config, score, observed_at_ms))
+
+
+def send_reminder(config: Config) -> bool:
+    if has_active_local_work(config) or has_suppressed_process(config):
+        print("prompt-nudger: reminder suppressed because local work is active")
+        return True
+    return send_telegram_text(config, build_reminder_message(config, now_ms()))
 
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{config.telegram_bot_token}/sendMessage",
@@ -282,7 +309,7 @@ class ActivityWindow:
             if has_active_local_work(self.config) or has_suppressed_process(self.config):
                 self.reset_after_request()
                 return
-            send_telegram(self.config, score, ended_at)
+            send_activity_nudge(self.config, score, ended_at)
             self.reset_after_request()
         except Exception as error:
             print(f"prompt-nudger: evaluation failed: {error}", file=sys.stderr)
@@ -371,6 +398,7 @@ def print_config(config: Config) -> None:
         "telegram_bot_token": "set" if config.telegram_bot_token else "missing",
         "telegram_chat_id": "set" if config.telegram_chat_id else "missing",
         "message": config.message,
+        "reminder_message": config.reminder_message,
         "include_details": config.include_details,
         "dry_run": config.dry_run,
         "machine_name": config.machine_name,
@@ -393,6 +421,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Standalone local Telegram nudges for sustained typing.")
     parser.add_argument("--live", action="store_true", help="Run macOS listen-only keyboard activity monitor")
     parser.add_argument("--pulse", action="store_true", help="Record one shortcut pulse for a running live helper")
+    parser.add_argument("--remind-now", action="store_true", help="Send one scheduled prompt reminder immediately")
     parser.add_argument("--send-test", action="store_true", help="Send one Telegram test message immediately")
     parser.add_argument("--test-key-event", action="store_true", help="Inject one local key-event weight into the nudge pipeline")
     parser.add_argument("--print-config", action="store_true", help="Print safe effective config without secrets")
@@ -405,8 +434,10 @@ def main() -> int:
     if args.pulse:
         append_pulse(config)
         return 0
+    if args.remind_now:
+        return 0 if send_reminder(config) else 1
     if args.send_test:
-        return 0 if send_telegram(config, config.activity_threshold, now_ms()) else 1
+        return 0 if send_activity_nudge(config, config.activity_threshold, now_ms()) else 1
     if args.test_key_event:
         return run_test_key_event(config)
     return run_live(config)
