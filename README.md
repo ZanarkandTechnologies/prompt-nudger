@@ -50,6 +50,58 @@ Then make your shortcut run:
 
 The pulse command appends one local marker to a pulse file. The running helper polls that file and treats each pulse as activity.
 
+## Codex Hooks
+
+Prompt Nudger can suppress Telegram nudges while a local Codex turn is active. Install the hook:
+
+```bash
+mkdir -p ~/.codex/hooks
+cp hooks/codex_activity.py ~/.codex/hooks/prompt_nudger_codex_activity.py
+chmod +x ~/.codex/hooks/prompt_nudger_codex_activity.py
+```
+
+Then merge these entries into `~/.codex/hooks.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/prompt_nudger_codex_activity.py\"",
+            "statusMessage": "Marking Prompt Nudger active work",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/prompt_nudger_codex_activity.py\"",
+            "statusMessage": "Clearing Prompt Nudger active work",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Make sure Codex hooks are enabled in `~/.codex/config.toml`:
+
+```toml
+[features]
+codex_hooks = true
+```
+
+The hook writes only local state to `~/.prompt-nudger/active.json`. It does not send network requests.
+
 ## Config
 
 All config is environment variables.
@@ -69,6 +121,9 @@ All config is environment variables.
 | `NUDGE_PULSE_FILE` | `~/.prompt-nudger/pulse.log` | Local marker file for shortcut pulses. |
 | `NUDGE_PULSE_WEIGHT` | `25` | Score added per pulse. |
 | `NUDGE_PULSE_POLL_SECONDS` | `0.5` | Pulse file polling interval. |
+| `NUDGE_SUPPRESS_WHEN_ACTIVE` | `1` | Suppress nudges while local hook state says Codex work is active. |
+| `NUDGE_ACTIVE_STATE_FILE` | `~/.prompt-nudger/active.json` | Local active-work state written by `hooks/codex_activity.py`. |
+| `NUDGE_ACTIVE_STATE_TTL_SECONDS` | `21600` | Ignore active-work state older than this. |
 | `NUDGE_SUPPRESS_PROCESS_NAMES` | empty | Comma-separated process name patterns; suppress nudges if any match `pgrep -f`. |
 
 Example:
@@ -99,6 +154,17 @@ Test a shortcut pulse:
 
 ```bash
 ./prompt_nudger.py --pulse
+```
+
+Test Codex active-work suppression:
+
+```bash
+STATE="$(mktemp)"
+printf '{"hook_event_name":"UserPromptSubmit","session_id":"demo","turn_id":"one"}' \
+  | NUDGE_ACTIVE_STATE_FILE="$STATE" ./hooks/codex_activity.py
+NUDGE_DRY_RUN=1 NUDGE_ACTIVE_STATE_FILE="$STATE" ./prompt_nudger.py --test-key-event
+printf '{"hook_event_name":"Stop","session_id":"demo","turn_id":"one"}' \
+  | NUDGE_ACTIVE_STATE_FILE="$STATE" ./hooks/codex_activity.py
 ```
 
 ## Install as a LaunchAgent

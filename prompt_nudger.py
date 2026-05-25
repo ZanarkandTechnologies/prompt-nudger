@@ -42,6 +42,9 @@ class Config:
     pulse_file: Path
     pulse_weight: int
     pulse_poll_seconds: float
+    suppress_when_active: bool
+    active_state_file: Path
+    active_state_ttl_seconds: int
     suppress_process_names: tuple[str, ...]
 
 
@@ -106,6 +109,9 @@ def load_config() -> Config:
         pulse_file=Path(os.getenv("NUDGE_PULSE_FILE", "~/.prompt-nudger/pulse.log")).expanduser(),
         pulse_weight=env_int("NUDGE_PULSE_WEIGHT", 25, 1),
         pulse_poll_seconds=env_float("NUDGE_PULSE_POLL_SECONDS", 0.5, 0.1),
+        suppress_when_active=env_bool("NUDGE_SUPPRESS_WHEN_ACTIVE", True),
+        active_state_file=Path(os.getenv("NUDGE_ACTIVE_STATE_FILE", "~/.prompt-nudger/active.json")).expanduser(),
+        active_state_ttl_seconds=env_int("NUDGE_ACTIVE_STATE_TTL_SECONDS", 6 * 60 * 60, 1),
         suppress_process_names=suppress_process_names,
     )
 
@@ -156,6 +162,31 @@ def has_suppressed_process(config: Config) -> bool:
         if result.returncode == 0:
             return True
     return False
+
+
+def has_active_local_work(config: Config) -> bool:
+    if not config.suppress_when_active:
+        return False
+    try:
+        with config.active_state_file.open("r", encoding="utf-8") as file:
+            state = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(state, dict):
+        return False
+
+    updated_at = state.get("updated_at")
+    if not isinstance(updated_at, (int, float)):
+        return False
+    if time.time() - float(updated_at) > config.active_state_ttl_seconds:
+        return False
+
+    active_count = state.get("active_count")
+    if isinstance(active_count, int):
+        return active_count > 0
+
+    active_turns = state.get("active_turns")
+    return isinstance(active_turns, dict) and len(active_turns) > 0
 
 
 def build_message(config: Config, score: int, observed_at_ms: int) -> str:
@@ -248,7 +279,7 @@ class ActivityWindow:
             if score < self.config.activity_threshold:
                 self.clear_evaluating()
                 return
-            if has_suppressed_process(self.config):
+            if has_active_local_work(self.config) or has_suppressed_process(self.config):
                 self.reset_after_request()
                 return
             send_telegram(self.config, score, ended_at)
@@ -350,6 +381,9 @@ def print_config(config: Config) -> None:
         "pulse_file": str(config.pulse_file),
         "pulse_weight": config.pulse_weight,
         "pulse_poll_seconds": config.pulse_poll_seconds,
+        "suppress_when_active": config.suppress_when_active,
+        "active_state_file": str(config.active_state_file),
+        "active_state_ttl_seconds": config.active_state_ttl_seconds,
         "suppress_process_names": config.suppress_process_names,
     }
     print(json.dumps(safe_config, indent=2))
