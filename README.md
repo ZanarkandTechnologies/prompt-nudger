@@ -1,16 +1,16 @@
-# Aikage Nudge Local
+# Prompt Nudger
 
 One local Python script that nudges you on Telegram when you have been typing for a while.
 
-This is the tiny standalone version of Aikage's activity nudge loop. It does not need Convex, the Aikage app, or a backend. Raw keys and typed text stay local; the script only counts activity weights and sends a Telegram message after the local threshold, grace delay, and cooldown allow it.
+Prompt Nudger is the tiny standalone version of the activity nudge loop. It does not need Convex, Aikage, or any backend. Raw keys and typed text stay local; the script only counts activity weights and sends a Telegram message after the local threshold, grace delay, and cooldown allow it.
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/KenjiPcx/aikage-nudge-local.git
-cd aikage-nudge-local
-python3 -m py_compile aikage_nudge.py
-chmod +x aikage_nudge.py
+git clone https://github.com/ZanarkandTechnologies/prompt-nudger.git
+cd prompt-nudger
+python3 -m py_compile prompt_nudger.py
+chmod +x prompt_nudger.py
 ```
 
 Set Telegram credentials:
@@ -23,13 +23,13 @@ export TELEGRAM_CHAT_ID="123456789"
 Send a setup test:
 
 ```bash
-./aikage_nudge.py --send-test
+./prompt_nudger.py --send-test
 ```
 
 Run live macOS keyboard activity monitoring:
 
 ```bash
-./aikage_nudge.py
+./prompt_nudger.py
 ```
 
 macOS live mode requires Accessibility permission for the terminal app running the script. The event tap is listen-only.
@@ -39,13 +39,13 @@ macOS live mode requires Accessibility permission for the terminal app running t
 Run the helper in a long-lived terminal:
 
 ```bash
-./aikage_nudge.py
+./prompt_nudger.py
 ```
 
 Then make your shortcut run:
 
 ```bash
-/path/to/aikage_nudge.py --pulse
+/path/to/prompt_nudger.py --pulse
 ```
 
 The pulse command appends one local marker to a pulse file. The running helper polls that file and treats each pulse as activity.
@@ -66,7 +66,7 @@ All config is environment variables.
 | `NUDGE_WINDOW_SECONDS` | `300` | Rolling activity scoring window. |
 | `NUDGE_GRACE_SECONDS` | `3` | Debounce delay after crossing the threshold. |
 | `NUDGE_COOLDOWN_SECONDS` | `60` | Minimum delay between Telegram sends. |
-| `NUDGE_PULSE_FILE` | `~/.aikage-nudge/pulse.log` | Local marker file for shortcut pulses. |
+| `NUDGE_PULSE_FILE` | `~/.prompt-nudger/pulse.log` | Local marker file for shortcut pulses. |
 | `NUDGE_PULSE_WEIGHT` | `25` | Score added per pulse. |
 | `NUDGE_PULSE_POLL_SECONDS` | `0.5` | Pulse file polling interval. |
 | `NUDGE_SUPPRESS_PROCESS_NAMES` | empty | Comma-separated process name patterns; suppress nudges if any match `pgrep -f`. |
@@ -78,7 +78,7 @@ export NUDGE_ACTIVITY_THRESHOLD=20
 export NUDGE_GRACE_SECONDS=3
 export NUDGE_COOLDOWN_SECONDS=60
 export NUDGE_MESSAGE="You have been writing for a bit. Want to start another agent?"
-./aikage_nudge.py
+./prompt_nudger.py
 ```
 
 ## Local Testing
@@ -86,24 +86,24 @@ export NUDGE_MESSAGE="You have been writing for a bit. Want to start another age
 Print safe config:
 
 ```bash
-./aikage_nudge.py --print-config
+./prompt_nudger.py --print-config
 ```
 
 Test the nudge pipeline without keyboard permissions:
 
 ```bash
-NUDGE_DRY_RUN=1 ./aikage_nudge.py --test-key-event
+NUDGE_DRY_RUN=1 ./prompt_nudger.py --test-key-event
 ```
 
 Test a shortcut pulse:
 
 ```bash
-./aikage_nudge.py --pulse
+./prompt_nudger.py --pulse
 ```
 
 ## Install as a LaunchAgent
 
-Create `~/Library/LaunchAgents/com.aikage.nudge-local.plist`:
+Create `~/Library/LaunchAgents/com.zanarkand.prompt-nudger.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -112,11 +112,11 @@ Create `~/Library/LaunchAgents/com.aikage.nudge-local.plist`:
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.aikage.nudge-local</string>
+  <string>com.zanarkand.prompt-nudger</string>
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/python3</string>
-    <string>/path/to/aikage_nudge.py</string>
+    <string>/path/to/prompt_nudger.py</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
@@ -140,8 +140,8 @@ Create `~/Library/LaunchAgents/com.aikage.nudge-local.plist`:
 Load it:
 
 ```bash
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.aikage.nudge-local.plist
-launchctl kickstart -k "gui/$(id -u)/com.aikage.nudge-local"
+launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.zanarkand.prompt-nudger.plist
+launchctl kickstart -k "gui/$(id -u)/com.zanarkand.prompt-nudger"
 ```
 
 ## Privacy

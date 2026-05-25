@@ -103,7 +103,7 @@ def load_config() -> Config:
         window_seconds=env_int("NUDGE_WINDOW_SECONDS", 300, 1),
         grace_seconds=env_int("NUDGE_GRACE_SECONDS", 3, 0),
         cooldown_seconds=env_int("NUDGE_COOLDOWN_SECONDS", 60, 0),
-        pulse_file=Path(os.getenv("NUDGE_PULSE_FILE", "~/.aikage-nudge/pulse.log")).expanduser(),
+        pulse_file=Path(os.getenv("NUDGE_PULSE_FILE", "~/.prompt-nudger/pulse.log")).expanduser(),
         pulse_weight=env_int("NUDGE_PULSE_WEIGHT", 25, 1),
         pulse_poll_seconds=env_float("NUDGE_PULSE_POLL_SECONDS", 0.5, 0.1),
         suppress_process_names=suppress_process_names,
@@ -123,7 +123,7 @@ def append_pulse(config: Config) -> None:
     ensure_pulse_file(config)
     with config.pulse_file.open("a", encoding="utf-8") as file:
         file.write(f"{now_ms()}\n")
-    print("aikage-nudge: recorded local activity pulse")
+    print("prompt-nudger: recorded local activity pulse")
 
 
 def poll_pulse_file(config: Config, window: "ActivityWindow") -> None:
@@ -138,7 +138,7 @@ def poll_pulse_file(config: Config, window: "ActivityWindow") -> None:
             if lines:
                 window.add(config.pulse_weight * len(lines))
         except OSError as error:
-            print(f"aikage-nudge: pulse read failed: {error}", file=sys.stderr)
+            print(f"prompt-nudger: pulse read failed: {error}", file=sys.stderr)
         time.sleep(config.pulse_poll_seconds)
 
 
@@ -174,11 +174,11 @@ def build_message(config: Config, score: int, observed_at_ms: int) -> str:
 def send_telegram(config: Config, score: int, observed_at_ms: int) -> bool:
     text = build_message(config, score, observed_at_ms)
     if config.dry_run:
-        print("aikage-nudge: dry run telegram message")
+        print("prompt-nudger: dry run telegram message")
         print(text)
         return True
     if not config.telegram_bot_token or not config.telegram_chat_id:
-        print("aikage-nudge: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
+        print("prompt-nudger: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
         return False
 
     request = urllib.request.Request(
@@ -190,10 +190,10 @@ def send_telegram(config: Config, score: int, observed_at_ms: int) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             response.read()
-        print("aikage-nudge: sent")
+        print("prompt-nudger: sent")
         return True
     except urllib.error.URLError as error:
-        print(f"aikage-nudge: telegram failed: {error}", file=sys.stderr)
+        print(f"prompt-nudger: telegram failed: {error}", file=sys.stderr)
         return False
 
 
@@ -254,7 +254,7 @@ class ActivityWindow:
             send_telegram(self.config, score, ended_at)
             self.reset_after_request()
         except Exception as error:
-            print(f"aikage-nudge: evaluation failed: {error}", file=sys.stderr)
+            print(f"prompt-nudger: evaluation failed: {error}", file=sys.stderr)
             self.clear_evaluating()
 
 
@@ -266,30 +266,30 @@ def ensure_listen_event_access(quartz: Any) -> bool:
             if preflight():
                 return True
         except Exception as error:
-            print(f"aikage-nudge: accessibility preflight failed: {error}", file=sys.stderr)
+            print(f"prompt-nudger: accessibility preflight failed: {error}", file=sys.stderr)
 
     if callable(request):
-        print("aikage-nudge: requesting macOS Accessibility permission.")
+        print("prompt-nudger: requesting macOS Accessibility permission.")
         try:
             if request():
                 return True
         except Exception as error:
-            print(f"aikage-nudge: accessibility request failed: {error}", file=sys.stderr)
-        print("aikage-nudge: grant Accessibility permission and restart live mode.", file=sys.stderr)
+            print(f"prompt-nudger: accessibility request failed: {error}", file=sys.stderr)
+        print("prompt-nudger: grant Accessibility permission and restart live mode.", file=sys.stderr)
         return False
     return True
 
 
 def run_live(config: Config) -> int:
     if platform.system() != "Darwin":
-        print("aikage-nudge: live mode currently requires macOS. Use --pulse or --test-key-event elsewhere.", file=sys.stderr)
+        print("prompt-nudger: live mode currently requires macOS. Use --pulse or --test-key-event elsewhere.", file=sys.stderr)
         return 2
 
     try:
         import CoreFoundation  # type: ignore[import-not-found]
         import Quartz  # type: ignore[import-not-found]
     except Exception as error:
-        print(f"aikage-nudge: install PyObjC for live mode: {error}", file=sys.stderr)
+        print(f"prompt-nudger: install PyObjC for live mode: {error}", file=sys.stderr)
         return 2
 
     if not ensure_listen_event_access(Quartz):
@@ -313,13 +313,13 @@ def run_live(config: Config) -> int:
         None,
     )
     if tap is None:
-        print("aikage-nudge: could not create event tap. Grant Accessibility permission.", file=sys.stderr)
+        print("prompt-nudger: could not create event tap. Grant Accessibility permission.", file=sys.stderr)
         return 2
 
     source = Quartz.CFMachPortCreateRunLoopSource(None, tap, 0)
     CoreFoundation.CFRunLoopAddSource(CoreFoundation.CFRunLoopGetCurrent(), source, CoreFoundation.kCFRunLoopCommonModes)
     Quartz.CGEventTapEnable(tap, True)
-    print("aikage-nudge: live helper running. Raw keys and typed text stay local.")
+    print("prompt-nudger: live helper running. Raw keys and typed text stay local.")
     CoreFoundation.CFRunLoopRun()
     return 0
 
