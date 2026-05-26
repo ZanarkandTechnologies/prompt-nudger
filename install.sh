@@ -29,6 +29,7 @@ echo "Prompt Nudger installed."
 echo
 echo "Commands:"
 echo "  prompt-nudger --print-config"
+echo "  prompt-nudger --status"
 echo "  prompt-nudger --send-test"
 echo "  prompt-nudger --remind-now"
 echo "  prompt-nudger-install-codex"

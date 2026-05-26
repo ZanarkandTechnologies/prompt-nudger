@@ -41,6 +41,7 @@ Common commands:
 
 ```bash
 prompt-nudger --print-config
+prompt-nudger --status
 prompt-nudger --send-test
 prompt-nudger --remind-now
 prompt-nudger --pulse
@@ -199,6 +200,12 @@ Print safe config:
 ./prompt_nudger.py --print-config
 ```
 
+Print local runtime status, including whether Codex hook state currently says work is active:
+
+```bash
+./prompt_nudger.py --status
+```
+
 Test the nudge pipeline without keyboard permissions:
 
 ```bash
@@ -298,7 +305,8 @@ The installer can create this automatically. For manual setup, create a second L
     <key>TELEGRAM_CHAT_ID</key>
     <string>replace-me</string>
     <key>NUDGE_REMINDER_MESSAGE</key>
-    <string>Quick reminder: write another prompt and keep the loop moving.</string>
+    <string>Nothing is running right now.
+Want to start a thread?</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>

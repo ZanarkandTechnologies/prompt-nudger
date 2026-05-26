@@ -25,6 +25,8 @@ from typing import Any
 
 HELPER_VERSION = "0.1.0"
 SEPARATOR_KEYCODES = {36, 48, 49, 51, 76}
+DEFAULT_ACTIVITY_MESSAGE = "Hey, you've been writing for a bit. Want to spin up another agent thread?"
+DEFAULT_REMINDER_MESSAGE = "Nothing is running right now.\nWant to start a thread?"
 
 
 @dataclass(frozen=True)
@@ -56,24 +58,30 @@ def env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
-def env_int(name: str, default: int, minimum: int) -> int:
+def env_int(name: str, default: int, minimum: int, maximum: int | None = None) -> int:
     raw = os.getenv(name)
     if raw is None:
         return default
     try:
-        return max(minimum, int(raw))
+        value = max(minimum, int(raw))
     except ValueError:
         return default
+    if maximum is not None:
+        return min(maximum, value)
+    return value
 
 
-def env_float(name: str, default: float, minimum: float) -> float:
+def env_float(name: str, default: float, minimum: float, maximum: float | None = None) -> float:
     raw = os.getenv(name)
     if raw is None:
         return default
     try:
-        return max(minimum, float(raw))
+        value = max(minimum, float(raw))
     except ValueError:
         return default
+    if maximum is not None:
+        return min(maximum, value)
+    return value
 
 
 def clean_text(value: object, limit: int) -> str | None:
@@ -96,27 +104,27 @@ def load_config() -> Config:
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", "").strip(),
         message=os.getenv(
             "NUDGE_MESSAGE",
-            "Hey, you've been writing for a bit. Want to spin up another agent thread?",
+            DEFAULT_ACTIVITY_MESSAGE,
         ).strip(),
         reminder_message=os.getenv(
             "NUDGE_REMINDER_MESSAGE",
-            "Quick reminder: write another prompt and keep the loop moving.",
+            DEFAULT_REMINDER_MESSAGE,
         ).strip(),
         include_details=env_bool("NUDGE_INCLUDE_DETAILS", True),
         dry_run=env_bool("NUDGE_DRY_RUN", False),
         machine_name=clean_text(os.getenv("NUDGE_MACHINE_NAME"), 120)
         or clean_text(socket.gethostname(), 120)
         or "unknown-machine",
-        activity_threshold=env_int("NUDGE_ACTIVITY_THRESHOLD", 20, 1),
-        window_seconds=env_int("NUDGE_WINDOW_SECONDS", 300, 1),
-        grace_seconds=env_int("NUDGE_GRACE_SECONDS", 3, 0),
-        cooldown_seconds=env_int("NUDGE_COOLDOWN_SECONDS", 60, 0),
+        activity_threshold=env_int("NUDGE_ACTIVITY_THRESHOLD", 20, 1, 10_000),
+        window_seconds=env_int("NUDGE_WINDOW_SECONDS", 300, 1, 24 * 60 * 60),
+        grace_seconds=env_int("NUDGE_GRACE_SECONDS", 3, 0, 15 * 60),
+        cooldown_seconds=env_int("NUDGE_COOLDOWN_SECONDS", 60, 0, 24 * 60 * 60),
         pulse_file=Path(os.getenv("NUDGE_PULSE_FILE", "~/.prompt-nudger/pulse.log")).expanduser(),
-        pulse_weight=env_int("NUDGE_PULSE_WEIGHT", 25, 1),
-        pulse_poll_seconds=env_float("NUDGE_PULSE_POLL_SECONDS", 0.5, 0.1),
+        pulse_weight=env_int("NUDGE_PULSE_WEIGHT", 25, 1, 10_000),
+        pulse_poll_seconds=env_float("NUDGE_PULSE_POLL_SECONDS", 0.5, 0.1, 60),
         suppress_when_active=env_bool("NUDGE_SUPPRESS_WHEN_ACTIVE", True),
         active_state_file=Path(os.getenv("NUDGE_ACTIVE_STATE_FILE", "~/.prompt-nudger/active.json")).expanduser(),
-        active_state_ttl_seconds=env_int("NUDGE_ACTIVE_STATE_TTL_SECONDS", 6 * 60 * 60, 1),
+        active_state_ttl_seconds=env_int("NUDGE_ACTIVE_STATE_TTL_SECONDS", 6 * 60 * 60, 1, 7 * 24 * 60 * 60),
         suppress_process_names=suppress_process_names,
     )
 
@@ -169,29 +177,47 @@ def has_suppressed_process(config: Config) -> bool:
     return False
 
 
-def has_active_local_work(config: Config) -> bool:
-    if not config.suppress_when_active:
-        return False
+def read_active_state(config: Config) -> dict[str, Any] | None:
     try:
         with config.active_state_file.open("r", encoding="utf-8") as file:
             state = json.load(file)
     except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(state, dict):
-        return False
+        return None
+    return state if isinstance(state, dict) else None
 
-    updated_at = state.get("updated_at")
-    if not isinstance(updated_at, (int, float)):
-        return False
-    if time.time() - float(updated_at) > config.active_state_ttl_seconds:
-        return False
 
+def active_count_from_state(state: dict[str, Any]) -> int:
     active_count = state.get("active_count")
     if isinstance(active_count, int):
-        return active_count > 0
+        return max(0, active_count)
 
     active_turns = state.get("active_turns")
-    return isinstance(active_turns, dict) and len(active_turns) > 0
+    if isinstance(active_turns, dict):
+        return len(active_turns)
+    return 0
+
+
+def active_state_age_seconds(config: Config, state: dict[str, Any]) -> float | None:
+    updated_at = state.get("updated_at")
+    if not isinstance(updated_at, (int, float)):
+        return None
+    return max(0.0, time.time() - float(updated_at))
+
+
+def has_active_local_work(config: Config) -> bool:
+    if not config.suppress_when_active:
+        return False
+    state = read_active_state(config)
+    if state is None:
+        return False
+
+    age_seconds = active_state_age_seconds(config, state)
+    if age_seconds is None:
+        return False
+    if age_seconds > config.active_state_ttl_seconds:
+        return False
+
+    return active_count_from_state(state) > 0
 
 
 def build_activity_message(config: Config, score: int, observed_at_ms: int) -> str:
@@ -226,18 +252,7 @@ def send_telegram_text(config: Config, text: str) -> bool:
         return True
     if not config.telegram_bot_token or not config.telegram_chat_id:
         print("prompt-nudger: missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID", file=sys.stderr)
-    return False
-
-
-def send_activity_nudge(config: Config, score: int, observed_at_ms: int) -> bool:
-    return send_telegram_text(config, build_activity_message(config, score, observed_at_ms))
-
-
-def send_reminder(config: Config) -> bool:
-    if has_active_local_work(config) or has_suppressed_process(config):
-        print("prompt-nudger: reminder suppressed because local work is active")
-        return True
-    return send_telegram_text(config, build_reminder_message(config, now_ms()))
+        return False
 
     request = urllib.request.Request(
         f"https://api.telegram.org/bot{config.telegram_bot_token}/sendMessage",
@@ -253,6 +268,17 @@ def send_reminder(config: Config) -> bool:
     except urllib.error.URLError as error:
         print(f"prompt-nudger: telegram failed: {error}", file=sys.stderr)
         return False
+
+
+def send_activity_nudge(config: Config, score: int, observed_at_ms: int) -> bool:
+    return send_telegram_text(config, build_activity_message(config, score, observed_at_ms))
+
+
+def send_reminder(config: Config) -> bool:
+    if has_active_local_work(config) or has_suppressed_process(config):
+        print("prompt-nudger: reminder suppressed because local work is active")
+        return True
+    return send_telegram_text(config, build_reminder_message(config, now_ms()))
 
 
 class ActivityWindow:
@@ -417,6 +443,31 @@ def print_config(config: Config) -> None:
     print(json.dumps(safe_config, indent=2))
 
 
+def get_status(config: Config) -> dict[str, Any]:
+    state = read_active_state(config)
+    state_age_seconds = active_state_age_seconds(config, state) if state is not None else None
+    state_is_fresh = state_age_seconds is not None and state_age_seconds <= config.active_state_ttl_seconds
+    active_count = active_count_from_state(state) if state is not None and state_is_fresh else 0
+    return {
+        "telegram_configured": bool(config.telegram_bot_token and config.telegram_chat_id),
+        "dry_run": config.dry_run,
+        "live_suppression_enabled": config.suppress_when_active,
+        "local_active_work": active_count > 0,
+        "local_active_count": active_count,
+        "active_state_file": str(config.active_state_file),
+        "active_state_seen": state is not None,
+        "active_state_fresh": state_is_fresh,
+        "active_state_age_seconds": round(state_age_seconds, 3) if state_age_seconds is not None else None,
+        "suppressed_process_running": has_suppressed_process(config),
+        "cooldown_seconds": config.cooldown_seconds,
+        "reminder_message": config.reminder_message,
+    }
+
+
+def print_status(config: Config) -> None:
+    print(json.dumps(get_status(config), indent=2))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Standalone local Telegram nudges for sustained typing.")
     parser.add_argument("--live", action="store_true", help="Run macOS listen-only keyboard activity monitor")
@@ -425,11 +476,15 @@ def main() -> int:
     parser.add_argument("--send-test", action="store_true", help="Send one Telegram test message immediately")
     parser.add_argument("--test-key-event", action="store_true", help="Inject one local key-event weight into the nudge pipeline")
     parser.add_argument("--print-config", action="store_true", help="Print safe effective config without secrets")
+    parser.add_argument("--status", action="store_true", help="Print safe runtime status and local active-work state")
     args = parser.parse_args()
     config = load_config()
 
     if args.print_config:
         print_config(config)
+        return 0
+    if args.status:
+        print_status(config)
         return 0
     if args.pulse:
         append_pulse(config)

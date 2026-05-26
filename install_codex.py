@@ -272,7 +272,7 @@ def install_launch_agents(token: str, chat_id: str) -> None:
     env = plist_env(
         token,
         chat_id,
-        ask("Periodic reminder message", "Quick reminder: write another prompt and keep the loop moving."),
+        ask("Periodic reminder message", "Nothing is running right now.\nWant to start a thread?"),
     )
 
     if ask_yes_no("Run the live typing nudger in the background?", True):
